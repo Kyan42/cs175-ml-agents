@@ -32,6 +32,12 @@ public class WalkerAgent : Agent
     private Vector3 m_WorldDirToWalk = Vector3.right;
 
     [Header("Target To Walk Towards")] public Transform target; //Target the agent will walk towards during training.
+    [Header("Arena Settings")]
+    public Collider arenaFloor;
+    private Vector3 m_BoundsCenter;
+    private Vector3 m_BoundsExtents;
+    private float m_previousTargetDistToEdge;
+    private float m_previousDistToTarget;
 
     [Header("Body Parts")] public Transform hips;
     public Transform chest;
@@ -84,6 +90,10 @@ public class WalkerAgent : Agent
         m_JdController.SetupBodyPart(handR);
 
         m_ResetParams = Academy.Instance.EnvironmentParameters;
+
+        // cache the bounds of the arena
+        m_BoundsCenter = arenaFloor.bounds.center;
+        m_BoundsExtents = arenaFloor.bounds.extents;
     }
 
     /// <summary>
@@ -105,6 +115,35 @@ public class WalkerAgent : Agent
         //Set our goal walking speed
         MTargetWalkingSpeed =
             randomizeWalkSpeedEachEpisode ? Random.Range(0.1f, m_maxWalkingSpeed) : MTargetWalkingSpeed;
+        // teleport the cube to its starting position
+        // The Curriculum Spawn (5 to 7 units away at a random angle)
+        float spawnDistance = Random.Range(5f, 7f); 
+        Vector2 randomDir = Random.insideUnitCircle.normalized; 
+        
+        target.position = new Vector3(
+            m_BoundsCenter.x + (randomDir.x * spawnDistance), 
+            m_BoundsCenter.y + 0.5f, 
+            m_BoundsCenter.z + (randomDir.y * spawnDistance)
+        );
+
+        Rigidbody targetRb = target.GetComponent<Rigidbody>();
+        if (targetRb != null)
+        {
+            targetRb.linearVelocity = Vector3.zero;
+            targetRb.angularVelocity = Vector3.zero;
+        }
+
+        // Accurately measure the starting distances for the economy
+        m_previousDistToTarget = Vector3.Distance(hips.position, target.position);
+        
+        float targetDistX = Mathf.Abs(target.position.x - m_BoundsCenter.x);
+        float targetDistZ = Mathf.Abs(target.position.z - m_BoundsCenter.z);
+        m_previousTargetDistToEdge = Mathf.Min(m_BoundsExtents.x - targetDistX, m_BoundsExtents.z - targetDistZ);
+
+
+        // reset the distance based on the bounds of the arena
+        m_previousTargetDistToEdge = Mathf.Min(m_BoundsExtents.x, m_BoundsExtents.z);
+        m_previousDistToTarget = Vector3.Distance(hips.position, target.position);
     }
 
     /// <summary>
@@ -155,6 +194,25 @@ public class WalkerAgent : Agent
 
         //Position of target position relative to cube
         sensor.AddObservation(m_OrientationCube.transform.InverseTransformPoint(target.transform.position));
+
+        // add observations about the agent to the edge of the ring, and the target block to the end of the ring
+        Vector3 myPos = hips.position; 
+        Vector3 targetPos = target.position;
+
+        // agent distance to edge
+        sensor.AddObservation(m_BoundsExtents.x - Mathf.Abs(myPos.x - m_BoundsCenter.x));
+        sensor.AddObservation(m_BoundsExtents.z - Mathf.Abs(myPos.z - m_BoundsCenter.z));
+
+        // How close is the block to the edge?
+        sensor.AddObservation(m_BoundsExtents.x - Mathf.Abs(targetPos.x - m_BoundsCenter.x));
+        sensor.AddObservation(m_BoundsExtents.z - Mathf.Abs(targetPos.z - m_BoundsCenter.z));
+        
+        // THIS WILL BE WHERE THE OPPONENT'S INFORMATION IS
+        // padding with 0s for now, to avoid the network breaking later when we add this information
+        for (int j = 0; j < 225; j++)
+        {
+            sensor.AddObservation(0f);
+        }
 
         foreach (var bodyPart in m_JdController.bodyPartsList)
         {
@@ -216,42 +274,66 @@ public class WalkerAgent : Agent
     {
         UpdateOrientationObjects();
 
-        var cubeForward = m_OrientationCube.transform.forward;
+        // existential Penalty: forces the agent to move (in theory)
+        AddReward(-0.0001f);
 
-        // Set reward for this step according to mixture of the following elements.
-        // a. Match target speed
-        //This reward will approach 1 if it matches perfectly and approach zero as it deviates
-        var matchSpeedReward = GetMatchingVelocityReward(cubeForward * MTargetWalkingSpeed, GetAvgVelocity());
+        // setup the dynamic ring boundaries using CACHED variables
+        Vector3 myPos = hips.position;
+        Vector3 targetPos = target.position;
 
-        //Check for NaNs
-        if (float.IsNaN(matchSpeedReward))
+        // reward the agent for getting closer to the block
+        float currentDistToTarget = Vector3.Distance(myPos, targetPos);
+        float agentProgress = m_previousDistToTarget - currentDistToTarget;
+        AddReward(agentProgress * 0.5f); 
+        m_previousDistToTarget = currentDistToTarget;
+
+        // calculate absolute distances from the cached center
+        float targetDistX = Mathf.Abs(targetPos.x - m_BoundsCenter.x);
+        float targetDistZ = Mathf.Abs(targetPos.z - m_BoundsCenter.z);
+        float myDistX = Mathf.Abs(myPos.x - m_BoundsCenter.x);
+        float myDistZ = Mathf.Abs(myPos.z - m_BoundsCenter.z);
+
+        // dense Progress Reward (greater than the agent getting closer to the block)
+        float currentTargetDistToEdge = Mathf.Min(m_BoundsExtents.x - targetDistX, m_BoundsExtents.z - targetDistZ);
+        float progress = m_previousTargetDistToEdge - currentTargetDistToEdge;
+        AddReward(progress * 1.0f); 
+        m_previousTargetDistToEdge = currentTargetDistToEdge;
+
+        // body parts dict
+        // var dict = m_JdController.bodyPartsDict;
+
+        // // reward a tall, high posture
+        // float postureBonus = (head.position.y - hips.position.y);
+        // AddReward(postureBonus * 0.001f); 
+
+        // punish falling or getting close to the floor to encourage bipedalism
+        // 1. Did the chest or hips physically hit the floor?
+        // bool hitMat = dict[hips].groundContact.touchingGround || dict[chest].groundContact.touchingGround;
+        
+        // // 2. Is the agent doing a push-up, crawling, or crouching too low? 
+        // float currentHipHeight = hips.position.y - m_BoundsCenter.y;
+        // bool hipsTooLow = currentHipHeight < 0.55f;
+        
+
+        // if (hitMat || hipsTooLow)
+        // {
+        //     // Debug.Log($"hipsTooLow: {hipsTooLow}  ;  hip position: {currentHipHeight}");
+        //     AddReward(-1.0f);
+        //     EndEpisode();
+        //     return;
+        // }
+
+        // 4. Win/Loss Conditions
+        if (targetDistX > m_BoundsExtents.x || targetDistZ > m_BoundsExtents.z)
         {
-            throw new ArgumentException(
-                "NaN in moveTowardsTargetReward.\n" +
-                $" cubeForward: {cubeForward}\n" +
-                $" hips.velocity: {m_JdController.bodyPartsDict[hips].rb.linearVelocity}\n" +
-                $" maximumWalkingSpeed: {m_maxWalkingSpeed}"
-            );
+            AddReward(1.0f);
+            EndEpisode();
         }
-
-        // b. Rotation alignment with target direction.
-        //This reward will approach 1 if it faces the target direction perfectly and approach zero as it deviates
-        var headForward = head.forward;
-        headForward.y = 0;
-        // var lookAtTargetReward = (Vector3.Dot(cubeForward, head.forward) + 1) * .5F;
-        var lookAtTargetReward = (Vector3.Dot(cubeForward, headForward) + 1) * .5F;
-
-        //Check for NaNs
-        if (float.IsNaN(lookAtTargetReward))
+        else if (myDistX > m_BoundsExtents.x || myDistZ > m_BoundsExtents.z)
         {
-            throw new ArgumentException(
-                "NaN in lookAtTargetReward.\n" +
-                $" cubeForward: {cubeForward}\n" +
-                $" head.forward: {head.forward}"
-            );
+            AddReward(-1.0f);
+            EndEpisode();
         }
-
-        AddReward(matchSpeedReward * lookAtTargetReward);
     }
 
     //Returns the average velocity of all of the body parts

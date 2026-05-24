@@ -31,7 +31,7 @@ Below is the chronological evolution of our agent's brain, showcasing how it int
       <b>The Goal:</b> Push the block off the edge.<br><br>
       <b>The Reward:</b> Dense progress reward + Existential penalty.<br><br>
       ✅ <b>What Worked:</b> The agent successfully moved the block.<br><br>
-      ❌ <b>What Didn't:</b> Because there was no punishment for faling, the agent learned to shimmy along the floor.
+      ❌ <b>What Didn't:</b> Because there was no punishment for falling, the agent learned to shimmy along the floor.
     </td>
   </tr>
 </table>
@@ -71,7 +71,7 @@ Below is the chronological evolution of our agent's brain, showcasing how it int
         <li>Added a hip threshold that punishes the agent and resets if its hips fall too low.</li>
       </ul>
       ✅ <b>What Worked:</b> The agent started taking some steps <br><br>
-      ❌ <b>What Didn't:</b> The agent learned to take a few steps then throw itself onto its side, and start sliding itself to the block. since it now wanted to stick close to the block whlie moving it, it slowly slid itself into the cube to push it.
+      ❌ <b>What Didn't:</b> The agent learned to take a few steps then throw itself onto its side, sliding itself into the block. Since it now wanted to stick close to the block whlie moving it, it slowly slid itself into the cube to push it.
     </td>
   </tr>
 </table>
@@ -89,7 +89,7 @@ Below is the chronological evolution of our agent's brain, showcasing how it int
     <td>
       <b>The Fix:</b> Increased the hip elevation requirement <br><br>
       ✅ <b>What Worked:</b> The agent no longer throws itself on the ground<br><br>
-      ❌ <b>What Didn't:</b> To keep its center of gravity high the agent bridges off its head, still not achieving a true walk.
+      ❌ <b>What Didn't:</b> To keep its center of gravity high the agent bridges off its head, still not achieving a true walk. scary ...
     </td>
   </tr>
 </table>
@@ -116,6 +116,6 @@ Below is the chronological evolution of our agent's brain, showcasing how it int
 ## 🛠️ Next Steps (Phase 2)
 With the agent now successfully walking, the next phase of the curriculum involves:
 1. **Target Specificity:** Penalizing the agent for touching the block with anything other than its hands/forearms to encourage a proper push.
-2. **Multi-Agent Self-Play:** Replacing the static heavy cube with a clone of the trained agent, transitioning the environment from a physics puzzle into a competitive, zero-sum environment.
+2. **Multi-Agent Self-Play:** Replacing the static heavy cube with a clone of the trained agent, transitioning the environment from a physics task into a competitive game.
 
 --
